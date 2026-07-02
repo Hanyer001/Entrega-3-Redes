@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Detección de comunidades en artistas de Spotify mediante géneros musicales usando los algoritmos Girvan-Newman y Louvain">
+  <title>Detección de Comunidades — Spotify Artists</title>
+  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ============================================ */
+    /*  DESIGN SYSTEM — Dark Glassmorphism          */
+    /* ============================================ */
+    :root {
+      --bg-primary: #060611;
+      --bg-panel: rgba(14, 14, 26, 0.88);
+      --border-glass: rgba(255, 255, 255, 0.07);
+      --border-glass-hover: rgba(255, 255, 255, 0.14);
+      --text-primary: #ededf5;
+      --text-secondary: #8e8ea8;
+      --text-muted: rgba(255, 255, 255, 0.30);
+      --accent-1: #7c6cf0;
+      --accent-2: #00e5c0;
+      --accent-gn: #ff6b9d;
+      --accent-lv: #00d4aa;
+      --accent-reset: #6b7280;
+      --radius: 16px;
+      --radius-sm: 10px;
+      --shadow-panel: 0 8px 40px rgba(0,0,0,0.55), 0 0 60px rgba(124,108,240,0.06);
+      --transition: 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-fast: 0.15s ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      background:
+        radial-gradient(ellipse 90% 60% at 15% 8%, rgba(124,108,240,0.08) 0%, transparent 55%),
+        radial-gradient(ellipse 70% 50% at 85% 92%, rgba(0,229,192,0.05) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(255,107,157,0.03) 0%, transparent 50%),
+        var(--bg-primary);
+    }
+
+    /* ============================================ */
+    /*  GRAPH CANVAS                                */
+    /* ============================================ */
+    #graph-canvas {
+      width: 100%; height: 100%;
+      position: absolute; top: 0; left: 0;
+    }
+
+    /* ============================================ */
+    /*  CONTROL PANEL — Upper-left glass card       */
+    /* ============================================ */
+    .control-panel {
+      position: fixed;
+      top: 22px; left: 22px;
+      width: 370px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(28px) saturate(1.4);
+      -webkit-backdrop-filter: blur(28px) saturate(1.4);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-panel);
+      z-index: 1000;
+      padding: 26px 24px 20px;
+      transition: var(--transition);
+      animation: panelSlideIn 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+      max-height: calc(100vh - 44px);
+      overflow-y: auto;
+    }
+    .control-panel::-webkit-scrollbar { width: 3px; }
+    .control-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+
+    @keyframes panelSlideIn {
+      from { opacity: 0; transform: translateY(-18px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* Title */
+    .panel-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      line-height: 1.5;
+      color: var(--text-primary);
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-glass);
+    }
+    .panel-title .highlight {
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent-1) 0%, var(--accent-2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      padding: 14px 8px 12px;
+      text-align: center;
+      transition: var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: linear-gradient(135deg, rgba(124,108,240,0.05), transparent);
+      opacity: 0;
+      transition: var(--transition);
+    }
+    .stat-card:hover::before { opacity: 1; }
+    .stat-card:hover { border-color: var(--border-glass-hover); transform: translateY(-1px); }
+    .stat-value {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .stat-label {
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      margin-top: 5px;
+      font-weight: 500;
+    }
+
+    /* Divider */
+    .panel-divider {
+      height: 1px;
+      background: var(--border-glass);
+      margin: 4px 0 16px;
+    }
+
+    /* Section label */
+    .section-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    /* Algorithm buttons */
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .btn {
+      width: 100%;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 13px 16px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.015em;
+      cursor: pointer;
+      transition: var(--transition);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn::after {
+      content: '';
+      position: absolute; top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+      transition: left 0.5s ease;
+    }
+    .btn:hover::after { left: 100%; }
+    .btn:active { transform: scale(0.975); }
+
+    .btn-gn {
+      background: linear-gradient(135deg, rgba(255,107,157,0.18), rgba(255,107,157,0.06));
+      color: var(--accent-gn);
+      border: 1px solid rgba(255,107,157,0.18);
+    }
+    .btn-gn:hover { box-shadow: 0 0 24px rgba(255,107,157,0.12); border-color: rgba(255,107,157,0.3); }
+    .btn-gn.active {
+      background: linear-gradient(135deg, rgba(255,107,157,0.32), rgba(255,107,157,0.12));
+      border-color: rgba(255,107,157,0.45);
+      box-shadow: 0 0 30px rgba(255,107,157,0.18), inset 0 0 20px rgba(255,107,157,0.05);
+    }
+
+    .btn-lv {
+      background: linear-gradient(135deg, rgba(0,212,170,0.18), rgba(0,212,170,0.06));
+      color: var(--accent-lv);
+      border: 1px solid rgba(0,212,170,0.18);
+    }
+    .btn-lv:hover { box-shadow: 0 0 24px rgba(0,212,170,0.12); border-color: rgba(0,212,170,0.3); }
+    .btn-lv.active {
+      background: linear-gradient(135deg, rgba(0,212,170,0.32), rgba(0,212,170,0.12));
+      border-color: rgba(0,212,170,0.45);
+      box-shadow: 0 0 30px rgba(0,212,170,0.18), inset 0 0 20px rgba(0,212,170,0.05);
+    }
+
+    .btn-reset {
+      background: rgba(107,114,128,0.12);
+      color: var(--text-secondary);
+      border: 1px solid rgba(107,114,128,0.18);
+    }
+    .btn-reset:hover {
+      box-shadow: 0 0 16px rgba(107,114,128,0.08);
+      color: var(--text-primary);
+      border-color: rgba(107,114,128,0.3);
+    }
+
+    .btn-icon {
+      width: 22px; height: 22px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+    .btn-desc {
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--text-muted);
+      margin-left: auto;
+      letter-spacing: 0;
+    }
+
+    /* GN Step controls */
+    .gn-controls {
+      display: none;
+      margin-top: 12px;
+      padding: 16px;
+      background: rgba(255,107,157,0.04);
+      border: 1px solid rgba(255,107,157,0.12);
+      border-radius: var(--radius-sm);
+      animation: slideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-10px); max-height: 0; }
+      to   { opacity: 1; transform: translateY(0); max-height: 200px; }
+    }
+    .gn-controls.visible { display: block; }
+
+    .gn-step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .gn-step-label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .gn-step-label .step-num {
+      font-weight: 700;
+      color: var(--accent-gn);
+      font-size: 14px;
+    }
+    .gn-step-label .step-total {
+      color: var(--text-muted);
+    }
+    .gn-comm-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent-gn);
+      background: rgba(255,107,157,0.12);
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,107,157,0.15);
+    }
+
+    .gn-step-nav {
+      display: flex;
+      gap: 8px;
+    }
+    .gn-step-btn {
+      flex: 1;
+      border: none;
+      border-radius: 8px;
+      padding: 9px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      background: rgba(255,107,157,0.1);
+      color: var(--accent-gn);
+      border: 1px solid rgba(255,107,157,0.14);
+      transition: var(--transition);
+    }
+    .gn-step-btn:hover:not(:disabled) { background: rgba(255,107,157,0.2); }
+    .gn-step-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+    .gn-step-btn:active:not(:disabled) { transform: scale(0.96); }
+
+    /* Progress bar for GN steps */
+    .gn-progress {
+      height: 3px;
+      background: rgba(255,107,157,0.1);
+      border-radius: 3px;
+      margin: 10px 0 0;
+      overflow: hidden;
+    }
+    .gn-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-gn), #ff9ed0);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+
+    /* Community legend */
+    .community-info {
+      display: none;
+      margin-top: 14px;
+      padding: 14px;
+      background: rgba(255,255,255,0.015);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      max-height: 200px;
+      overflow-y: auto;
+      animation: slideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .community-info.visible { display: block; }
+    .community-info::-webkit-scrollbar { width: 3px; }
+    .community-info::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+
+    .community-info-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .community-info-title .count-badge {
+      background: rgba(124,108,240,0.15);
+      color: var(--accent-1);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .comm-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 5px 0;
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      transition: var(--transition-fast);
+    }
+    .comm-item:hover { color: var(--text-primary); }
+    .comm-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: 0 0 6px currentColor;
+    }
+    .comm-count {
+      font-weight: 700;
+      color: var(--text-primary);
+      min-width: 28px;
+    }
+    .comm-preview {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    /* ============================================ */
+    /*  LOADING OVERLAY                             */
+    /* ============================================ */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-primary);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.6s ease, visibility 0.6s;
+    }
+    .loading-overlay.hidden { opacity: 0; pointer-events: none; visibility: hidden; }
+
+    .loading-ring {
+      width: 52px; height: 52px;
+      position: relative;
+    }
+    .loading-ring::before,
+    .loading-ring::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2.5px solid transparent;
+    }
+    .loading-ring::before {
+      border-top-color: var(--accent-1);
+      border-right-color: var(--accent-1);
+      animation: ringSpin 1s linear infinite;
+    }
+    .loading-ring::after {
+      border-bottom-color: var(--accent-2);
+      border-left-color: var(--accent-2);
+      animation: ringSpinReverse 1.5s linear infinite;
+    }
+    @keyframes ringSpin { to { transform: rotate(360deg); } }
+    @keyframes ringSpinReverse { to { transform: rotate(-360deg); } }
+
+    .loading-text {
+      margin-top: 22px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      letter-spacing: 0.03em;
+    }
+    .loading-substatus {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+      transition: var(--transition-fast);
+    }
+
+    /* ============================================ */
+    /*  TOOLTIP                                     */
+    /* ============================================ */
+    .node-tooltip {
+      background: rgba(12,12,22,0.96) !important;
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border-glass) !important;
+      border-radius: 12px !important;
+      padding: 16px 18px !important;
+      font-family: 'Inter', sans-serif !important;
+      color: var(--text-primary) !important;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
+      max-width: 300px;
+    }
+    .tooltip-name {
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+    .tooltip-genres {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+    .tooltip-followers {
+      font-size: 11px;
+      color: var(--accent-2);
+      margin-top: 6px;
+      font-weight: 500;
+    }
+
+    /* ============================================ */
+    /*  WATERMARK                                   */
+    /* ============================================ */
+    .watermark {
+      position: fixed;
+      bottom: 14px; right: 18px;
+      font-size: 9.5px;
+      font-weight: 400;
+      letter-spacing: 0.04em;
+      color: rgba(255, 255, 255, 0.10);
+      z-index: 1000;
+      pointer-events: none;
+      user-select: none;
+      line-height: 1.4;
+      text-align: right;
+    }
+
+    /* ============================================ */
+    /*  RESPONSIVE                                  */
+    /* ============================================ */
+    @media (max-width: 480px) {
+      .control-panel { width: calc(100% - 24px); left: 12px; top: 12px; padding: 18px 16px 14px; }
+      .stat-value { font-size: 18px; }
+      .btn { padding: 11px 14px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Loading overlay -->
+  <div class="loading-overlay" id="loading">
+    <div class="loading-ring"></div>
+    <div class="loading-text">Construyendo grafo de artistas…</div>
+    <div class="loading-substatus" id="loading-sub">Cargando datos CSV</div>
+  </div>
+
+  <!-- Graph canvas -->
+  <div id="graph-canvas"></div>
+
+  <!-- Control panel -->
+  <div class="control-panel" id="panel">
+    <div class="panel-title">
+      <span class="highlight">Detección de comunidades</span> en artistas de Spotify mediante géneros musicales
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-nodes">—</div>
+        <div class="stat-label">Nodos</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-edges">—</div>
+        <div class="stat-label">Aristas</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-jaccard">—</div>
+        <div class="stat-label">Jaccard</div>
+      </div>
+    </div>
+
+    <div class="panel-divider"></div>
+    <div class="section-label">Algoritmos</div>
+
+    <div class="btn-group">
+      <button class="btn btn-gn" id="btn-gn" onclick="activateGN()">
+        <span class="btn-icon">◈</span>
+        Girvan-Newman
+        <span class="btn-desc">Top-Down</span>
+      </button>
+      <button class="btn btn-lv" id="btn-lv" onclick="activateLouvain()">
+        <span class="btn-icon">◉</span>
+        Louvain
+        <span class="btn-desc">Bottom-Up</span>
+      </button>
+      <button class="btn btn-reset" id="btn-reset" onclick="resetAlgorithm()">
+        <span class="btn-icon">↺</span>
+        Resetear algoritmo
+      </button>
+    </div>
+
+    <!-- GN step-by-step controls -->
+    <div class="gn-controls" id="gn-controls">
+      <div class="gn-step-header">
+        <div class="gn-step-label">
+          Paso <span class="step-num" id="gn-step-num">1</span>
+          <span class="step-total">/ <span id="gn-step-total">—</span></span>
+        </div>
+        <span class="gn-comm-badge" id="gn-comm-count">— comunidades</span>
+      </div>
+      <div class="gn-step-nav">
+        <button class="gn-step-btn" id="gn-prev" onclick="gnPrev()">◂ Anterior</button>
+        <button class="gn-step-btn" id="gn-next" onclick="gnNext()">Siguiente ▸</button>
+      </div>
+      <div class="gn-progress">
+        <div class="gn-progress-fill" id="gn-progress-fill" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- Community legend -->
+    <div class="community-info" id="comm-info"></div>
+  </div>
+
+  <!-- Watermark -->
+  <div class="watermark">Entrega 3 — Ronald Villaman — Hanyer Alegria — Alejandro Hernandez</div>
+
+  <script>
+  // ===============================================================
+  //  GLOBAL STATE
+  // ===============================================================
+  const UMBRAL_JACCARD = 0.6;
+  let artists = [];         // {id, name, followers, genres: string[]}
+  let graphEdges = [];       // {from, to, weight}
+  let network = null;
+  let visNodes = null;
+  let visEdges = null;
+  let gnSteps = [];          // array of arrays of communities (each community is array of ids)
+  let louvainComm = [];      // array of communities
+  let currentMode = 'none';  // 'none' | 'gn' | 'louvain'
+  let gnCurrentStep = 0;
+
+  // ===============================================================
+  //  VIVID COMMUNITY COLORS — 25 maximally distinct hues
+  // ===============================================================
+  const COMMUNITY_COLORS = [
+    '#e74c3c',   // Red
+    '#3498db',   // Blue
+    '#2ecc71',   // Emerald
+    '#f39c12',   // Orange
+    '#9b59b6',   // Purple
+    '#1abc9c',   // Teal
+    '#e67e22',   // Carrot
+    '#e84393',   // Pink
+    '#00b894',   // Mint
+    '#6c5ce7',   // Indigo
+    '#fd79a8',   // Hot Pink
+    '#00cec9',   // Cyan
+    '#fdcb6e',   // Yellow
+    '#55efc4',   // Light Mint
+    '#a29bfe',   // Lavender
+    '#ff7675',   // Coral
+    '#74b9ff',   // Light Blue
+    '#ff6348',   // Tomato
+    '#7bed9f',   // Light Green
+    '#eccc68',   // Gold
+    '#ff6b81',   // Watermelon
+    '#70a1ff',   // Periwinkle
+    '#ffa502',   // Amber
+    '#2ed573',   // Grass
+    '#5352ed'    // Royal Blue
+  ];
+  const GRAY_NODE = '#2a2a40';
+  const GRAY_EDGE = 'rgba(50,50,70,0.22)';
+
+  // ===============================================================
+  //  CSV PARSER (handles quoted fields with commas)
+  // ===============================================================
+  function parseCSV(text) {
+    const lines = text.trim().split('\n');
+    const headers = parseCSVLine(lines[0]);
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const vals = parseCSVLine(line);
+      const obj = {};
+      headers.forEach((h, idx) => obj[h.trim()] = (vals[idx] || '').trim());
+      rows.push(obj);
+    }
+    return rows;
+  }
+
+  function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === ',' && !inQuotes) { result.push(current); current = ''; continue; }
+      current += ch;
+    }
+    result.push(current);
+    return result;
+  }
+
+  // ===============================================================
+  //  JACCARD SIMILARITY
+  // ===============================================================
+  function jaccardSimilarity(a, b) {
+    const setA = new Set(a);
+    const setB = new Set(b);
+    let inter = 0;
+    for (const x of setA) if (setB.has(x)) inter++;
+    if (inter === 0) return 0;
+    return inter / (setA.size + setB.size - inter);
+  }
+
+  // ===============================================================
+  //  GRAPH CONSTRUCTION
+  // ===============================================================
+  function buildGraph(rows) {
+    artists = rows.map(r => ({
+      id: r.id_artista,
+      name: r.name,
+      followers: parseInt(r.followers) || 0,
+      genres: r.genres.split(',').map(g => g.trim()).filter(g => g)
+    }));
+
+    graphEdges = [];
+    for (let i = 0; i < artists.length; i++) {
+      for (let j = i + 1; j < artists.length; j++) {
+        const sim = jaccardSimilarity(artists[i].genres, artists[j].genres);
+        if (sim >= UMBRAL_JACCARD) {
+          graphEdges.push({ from: artists[i].id, to: artists[j].id, weight: sim });
+        }
+      }
+    }
+
+    // Remove isolated nodes
+    const connected = new Set();
+    graphEdges.forEach(e => { connected.add(e.from); connected.add(e.to); });
+    artists = artists.filter(a => connected.has(a.id));
+  }
+
+  // ===============================================================
+  //  GIRVAN-NEWMAN ALGORITHM (JavaScript implementation)
+  // ===============================================================
+  function runGirvanNewman(maxCommunities) {
+    // Build adjacency list from current edges
+    const adj = {};
+    artists.forEach(a => adj[a.id] = new Set());
+    const edgeSet = graphEdges.map(e => [e.from, e.to]);
+    edgeSet.forEach(([u, v]) => { adj[u].add(v); adj[v].add(u); });
+
+    gnSteps = [];
+
+    const getComponents = (adjMap) => {
+      const visited = new Set();
+      const components = [];
+      for (const node of Object.keys(adjMap)) {
+        if (visited.has(node)) continue;
+        const comp = [];
+        const queue = [node];
+        visited.add(node);
+        while (queue.length) {
+          const curr = queue.shift();
+          comp.push(curr);
+          for (const nb of adjMap[curr]) {
+            if (!visited.has(nb)) { visited.add(nb); queue.push(nb); }
+          }
+        }
+        components.push(comp);
+      }
+      return components;
+    };
+
+    const calcEdgeBetweenness = (adjMap) => {
+      const betweenness = {};
+      const nodes = Object.keys(adjMap);
+      for (const s of nodes) {
+        // BFS from s
+        const dist = {}; const sigma = {}; const pred = {};
+        const stack = [];
+        nodes.forEach(n => { dist[n] = -1; sigma[n] = 0; pred[n] = []; });
+        dist[s] = 0; sigma[s] = 1;
+        const queue = [s];
+        while (queue.length) {
+          const v = queue.shift();
+          stack.push(v);
+          for (const w of adjMap[v]) {
+            if (dist[w] === -1) { dist[w] = dist[v] + 1; queue.push(w); }
+            if (dist[w] === dist[v] + 1) { sigma[w] += sigma[v]; pred[w].push(v); }
+          }
+        }
+        // Back-propagation
+        const delta = {};
+        nodes.forEach(n => delta[n] = 0);
+        while (stack.length) {
+          const w = stack.pop();
+          for (const v of pred[w]) {
+            const c = (sigma[v] / sigma[w]) * (1 + delta[w]);
+            const key = [v, w].sort().join('|');
+            betweenness[key] = (betweenness[key] || 0) + c;
+            delta[v] += c;
+          }
+        }
+      }
+      // Divide by 2 (undirected)
+      for (const k in betweenness) betweenness[k] /= 2;
+      return betweenness;
+    };
+
+    // Store initial state
+    let prevNumComps = 0;
+
+    for (let iter = 0; iter < 500; iter++) {
+      const comps = getComponents(adj);
+      if (comps.length !== prevNumComps) {
+        gnSteps.push(comps.map(c => [...c]));
+        prevNumComps = comps.length;
+      }
+      if (comps.length >= maxCommunities) break;
+
+      // Compute edge betweenness
+      const betweenness = calcEdgeBetweenness(adj);
+      if (Object.keys(betweenness).length === 0) break;
+
+      // Find edge with max betweenness
+      let maxBet = -1, maxEdge = null;
+      for (const [key, val] of Object.entries(betweenness)) {
+        if (val > maxBet) { maxBet = val; maxEdge = key; }
+      }
+
+      // Remove the edge
+      const [u, v] = maxEdge.split('|');
+      adj[u].delete(v);
+      adj[v].delete(u);
+    }
+
+    // Ensure final state is captured
+    const finalComps = getComponents(adj);
+    if (gnSteps.length === 0 || gnSteps[gnSteps.length - 1].length !== finalComps.length) {
+      gnSteps.push(finalComps);
+    }
+
+    return gnSteps;
+  }
+
+  // ===============================================================
+  //  LOUVAIN ALGORITHM (JavaScript implementation)
+  // ===============================================================
+  function runLouvain() {
+    // Build weighted adjacency
+    const nodeIds = artists.map(a => a.id);
+
+    // Community assignment: node -> community id
+    const comm = {};
+    nodeIds.forEach((n, i) => comm[n] = i);
+
+    // Adjacency with weights
+    const adjW = {};
+    nodeIds.forEach(n => adjW[n] = {});
+    graphEdges.forEach(e => {
+      adjW[e.from][e.to] = e.weight;
+      adjW[e.to][e.from] = e.weight;
+    });
+
+    // Total weight
+    let m = 0;
+    graphEdges.forEach(e => m += e.weight);
+
+    // Degree (weighted)
+    const deg = {};
+    nodeIds.forEach(n => {
+      deg[n] = 0;
+      for (const nb in adjW[n]) deg[n] += adjW[n][nb];
+    });
+
+    // Get community groupings
+    const getCommunityNodes = () => {
+      const groups = {};
+      for (const n in comm) {
+        const c = comm[n];
+        if (!groups[c]) groups[c] = [];
+        groups[c].push(n);
+      }
+      return groups;
+    };
+
+    // Modularity gain of moving node i to community C
+    const modGain = (node, targetComm) => {
+      let ki = deg[node];
+      let ki_in = 0;
+      let sigma_tot = 0;
+
+      for (const n in comm) {
+        if (comm[n] === targetComm) {
+          sigma_tot += deg[n];
+          if (adjW[node][n]) ki_in += adjW[node][n];
+        }
+      }
+
+      return (ki_in / m) - (sigma_tot * ki) / (2 * m * m);
+    };
+
+    // Phase 1: local moving
+    let improved = true;
+    let iterations = 0;
+    while (improved && iterations < 30) {
+      improved = false;
+      iterations++;
+      for (const node of nodeIds) {
+        const currentComm = comm[node];
+        // Find neighboring communities
+        const neighborComms = new Set();
+        for (const nb in adjW[node]) neighborComms.add(comm[nb]);
+        neighborComms.add(currentComm);
+
+        let bestComm = currentComm;
+        let bestGain = 0;
+
+        for (const c of neighborComms) {
+          if (c === currentComm) continue;
+          const gain = modGain(node, c) - modGain(node, currentComm);
+          if (gain > bestGain) { bestGain = gain; bestComm = c; }
+        }
+
+        if (bestComm !== currentComm) {
+          comm[node] = bestComm;
+          improved = true;
+        }
+      }
+    }
+
+    // Extract communities
+    const groups = getCommunityNodes();
+    louvainComm = Object.values(groups).sort((a, b) => b.length - a.length);
+    return louvainComm;
+  }
+
+  // ===============================================================
+  //  VISUALIZATION
+  // ===============================================================
+  function formatFollowers(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(0) + 'K';
+    return n.toString();
+  }
+
+  function initNetwork() {
+    const artistMap = {};
+    artists.forEach(a => artistMap[a.id] = a);
+
+    const nodes = artists.map(a => ({
+      id: a.id,
+      label: a.name,
+      title: `<div class="node-tooltip">
+                <div class="tooltip-name">${a.name}</div>
+                <div class="tooltip-genres">🎵 ${a.genres.join(', ')}</div>
+                <div class="tooltip-followers">👥 ${formatFollowers(a.followers)} seguidores</div>
+              </div>`,
+      color: {
+        background: GRAY_NODE,
+        border: 'rgba(255,255,255,0.06)',
+        highlight: { background: '#7c6cf0', border: '#a29bfe' },
+        hover: { background: '#3a3a56', border: 'rgba(255,255,255,0.12)' }
+      },
+      font: { color: 'rgba(255,255,255,0.65)', size: 10, face: 'Inter' },
+      size: Math.max(6, Math.min(20, Math.log10(a.followers + 1) * 2.2)),
+      borderWidth: 1.2,
+      shadow: { enabled: true, color: 'rgba(0,0,0,0.35)', size: 5, x: 0, y: 2 }
+    }));
+
+    const edges = graphEdges.map(e => ({
+      from: e.from,
+      to: e.to,
+      color: { color: GRAY_EDGE, highlight: 'rgba(124,108,240,0.35)', hover: 'rgba(255,255,255,0.1)' },
+      width: 0.5,
+      smooth: { type: 'continuous', roundness: 0.15 }
+    }));
+
+    visNodes = new vis.DataSet(nodes);
+    visEdges = new vis.DataSet(edges);
+
+    const container = document.getElementById('graph-canvas');
+    const data = { nodes: visNodes, edges: visEdges };
+    const options = {
+      physics: {
+        enabled: true,
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: {
+          gravitationalConstant: -30,
+          centralGravity: 0.008,
+          springLength: 80,
+          springConstant: 0.06,
+          damping: 0.45,
+          avoidOverlap: 0.3
+        },
+        stabilization: {
+          enabled: true,
+          iterations: 300,
+          updateInterval: 30
+        },
+        maxVelocity: 40,
+        minVelocity: 0.5
+      },
+      interaction: {
+        hover: true,
+        tooltipDelay: 150,
+        hideEdgesOnDrag: true,
+        hideEdgesOnZoom: true,
+        zoomSpeed: 0.7
+      },
+      nodes: {
+        shape: 'dot',
+        scaling: { min: 6, max: 20 }
+      },
+      edges: {
+        selectionWidth: 1.5
+      }
+    };
+
+    network = new vis.Network(container, data, options);
+
+    network.on('stabilizationIterationsDone', () => {
+      network.setOptions({ physics: { enabled: false } });
+    });
+
+    // Update stats
+    document.getElementById('stat-nodes').textContent = artists.length;
+    document.getElementById('stat-edges').textContent = graphEdges.length.toLocaleString();
+    document.getElementById('stat-jaccard').textContent = '≥ ' + UMBRAL_JACCARD;
+
+    // Hide loading
+    setTimeout(() => {
+      document.getElementById('loading').classList.add('hidden');
+    }, 700);
+  }
+
+  // ===============================================================
+  //  COMMUNITY COLORING
+  // ===============================================================
+  function applyColors(communities) {
+    const nodeToComm = {};
+    communities.forEach((comm, idx) => {
+      comm.forEach(nodeId => { nodeToComm[nodeId] = idx; });
+    });
+
+    const updates = [];
+    artists.forEach(a => {
+      const commIdx = nodeToComm[a.id];
+      const color = commIdx !== undefined ? COMMUNITY_COLORS[commIdx % COMMUNITY_COLORS.length] : GRAY_NODE;
+      updates.push({
+        id: a.id,
+        color: {
+          background: color,
+          border: color,
+          highlight: { background: lightenColor(color, 35), border: lightenColor(color, 55) },
+          hover: { background: lightenColor(color, 18), border: lightenColor(color, 35) }
+        },
+        font: { color: 'rgba(255,255,255,0.88)', size: 10, face: 'Inter' }
+      });
+    });
+    visNodes.update(updates);
+
+    // Update edges
+    const edgeUpdates = [];
+    visEdges.forEach(e => {
+      const cFrom = nodeToComm[e.from];
+      const cTo = nodeToComm[e.to];
+      const sameComm = cFrom !== undefined && cFrom === cTo;
+      edgeUpdates.push({
+        id: e.id,
+        color: {
+          color: sameComm ? hexToRgba(COMMUNITY_COLORS[cFrom % COMMUNITY_COLORS.length], 0.28) : 'rgba(50,50,70,0.06)',
+          highlight: sameComm ? hexToRgba(COMMUNITY_COLORS[cFrom % COMMUNITY_COLORS.length], 0.55) : 'rgba(90,90,110,0.18)'
+        },
+        width: sameComm ? 1.2 : 0.25
+      });
+    });
+    visEdges.update(edgeUpdates);
+
+    // Show legend
+    showLegend(communities);
+  }
+
+  function resetColors() {
+    const updates = artists.map(a => ({
+      id: a.id,
+      color: {
+        background: GRAY_NODE,
+        border: 'rgba(255,255,255,0.06)',
+        highlight: { background: '#7c6cf0', border: '#a29bfe' },
+        hover: { background: '#3a3a56', border: 'rgba(255,255,255,0.12)' }
+      },
+      font: { color: 'rgba(255,255,255,0.65)', size: 10, face: 'Inter' }
+    }));
+    visNodes.update(updates);
+
+    const edgeUpdates = [];
+    visEdges.forEach(e => {
+      edgeUpdates.push({
+        id: e.id,
+        color: { color: GRAY_EDGE, highlight: 'rgba(124,108,240,0.35)' },
+        width: 0.5
+      });
+    });
+    visEdges.update(edgeUpdates);
+  }
+
+  function lightenColor(hex, percent) {
+    const num = parseInt(hex.replace('#', ''), 16);
+    const r = Math.min(255, (num >> 16) + percent);
+    const g = Math.min(255, ((num >> 8) & 0x00FF) + percent);
+    const b = Math.min(255, (num & 0x0000FF) + percent);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  function hexToRgba(hex, alpha) {
+    const num = parseInt(hex.replace('#', ''), 16);
+    return `rgba(${num >> 16},${(num >> 8) & 0xFF},${num & 0xFF},${alpha})`;
+  }
+
+  // ===============================================================
+  //  LEGEND
+  // ===============================================================
+  function showLegend(communities) {
+    const el = document.getElementById('comm-info');
+    const artistMap = {};
+    artists.forEach(a => artistMap[a.id] = a);
+
+    let html = `<div class="community-info-title">
+      Comunidades detectadas <span class="count-badge">${communities.length}</span>
+    </div>`;
+
+    communities.forEach((comm, i) => {
+      const color = COMMUNITY_COLORS[i % COMMUNITY_COLORS.length];
+      const preview = comm.slice(0, 3).map(id => artistMap[id] ? artistMap[id].name : id).join(', ');
+      html += `<div class="comm-item">
+        <span class="comm-dot" style="background:${color}; color:${color}"></span>
+        <span class="comm-count">${comm.length}</span>
+        <span class="comm-preview" style="color:${color}">${preview}${comm.length > 3 ? '…' : ''}</span>
+      </div>`;
+    });
+
+    el.innerHTML = html;
+    el.classList.add('visible');
+  }
+
+  function hideLegend() {
+    document.getElementById('comm-info').classList.remove('visible');
+  }
+
+  // ===============================================================
+  //  BUTTON ACTIONS
+  // ===============================================================
+  function setActiveBtn(mode) {
+    document.getElementById('btn-gn').classList.toggle('active', mode === 'gn');
+    document.getElementById('btn-lv').classList.toggle('active', mode === 'louvain');
+  }
+
+  function activateGN() {
+    currentMode = 'gn';
+    setActiveBtn('gn');
+    document.getElementById('gn-controls').classList.add('visible');
+
+    if (gnSteps.length === 0) {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('loading-sub').textContent = 'Ejecutando Girvan-Newman…';
+      setTimeout(() => {
+        runGirvanNewman(10);
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('gn-step-total').textContent = gnSteps.length;
+        gnCurrentStep = 0;
+        showGNStep(0);
+      }, 100);
+    } else {
+      gnCurrentStep = 0;
+      showGNStep(0);
+    }
+  }
+
+  function showGNStep(step) {
+    gnCurrentStep = step;
+    const comms = gnSteps[step];
+    document.getElementById('gn-step-num').textContent = step + 1;
+    document.getElementById('gn-step-total').textContent = gnSteps.length;
+    document.getElementById('gn-comm-count').textContent = comms.length + ' comunidad' + (comms.length !== 1 ? 'es' : '');
+    document.getElementById('gn-prev').disabled = step === 0;
+    document.getElementById('gn-next').disabled = step === gnSteps.length - 1;
+
+    // Update progress bar
+    const progress = gnSteps.length > 1 ? (step / (gnSteps.length - 1)) * 100 : 100;
+    document.getElementById('gn-progress-fill').style.width = progress + '%';
+
+    applyColors(comms);
+  }
+
+  function gnPrev() { if (gnCurrentStep > 0) showGNStep(gnCurrentStep - 1); }
+  function gnNext() { if (gnCurrentStep < gnSteps.length - 1) showGNStep(gnCurrentStep + 1); }
+
+  function activateLouvain() {
+    currentMode = 'louvain';
+    setActiveBtn('louvain');
+    document.getElementById('gn-controls').classList.remove('visible');
+
+    if (louvainComm.length === 0) {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('loading-sub').textContent = 'Ejecutando Louvain…';
+      setTimeout(() => {
+        runLouvain();
+        document.getElementById('loading').classList.add('hidden');
+        applyColors(louvainComm);
+      }, 100);
+    } else {
+      applyColors(louvainComm);
+    }
+  }
+
+  function resetAlgorithm() {
+    currentMode = 'none';
+    setActiveBtn('none');
+    document.getElementById('gn-controls').classList.remove('visible');
+    hideLegend();
+    resetColors();
+  }
+
+  // ===============================================================
+  //  INIT — Load CSV and bootstrap
+  // ===============================================================
+  async function init() {
+    try {
+      document.getElementById('loading-sub').textContent = 'Cargando datos CSV…';
+      const resp = await fetch('top_400_artists_gn.csv');
+      const text = await resp.text();
+      const rows = parseCSV(text);
+
+      document.getElementById('loading-sub').textContent = 'Calculando similitud de Jaccard…';
+      await new Promise(r => setTimeout(r, 50));
+      buildGraph(rows);
+
+      document.getElementById('loading-sub').textContent = 'Renderizando grafo con ' + artists.length + ' nodos…';
+      await new Promise(r => setTimeout(r, 50));
+      initNetwork();
+    } catch (err) {
+      console.error('Error initializing:', err);
+      document.getElementById('loading-sub').textContent = 'Error: ' + err.message;
+    }
+  }
+
+  init();
+  </script>
+</body>
+</html>
