@@ -459,33 +459,36 @@
     }
 
     /* ============================================ */
-    /*  TOOLTIP                                     */
+    /*  TOOLTIP (vis-network native container)       */
     /* ============================================ */
-    .node-tooltip {
+    div.vis-tooltip {
       background: rgba(12,12,22,0.96) !important;
-      backdrop-filter: blur(20px);
-      border: 1px solid var(--border-glass) !important;
+      backdrop-filter: blur(20px) !important;
+      -webkit-backdrop-filter: blur(20px) !important;
+      border: 1px solid rgba(255,255,255,0.09) !important;
       border-radius: 12px !important;
-      padding: 16px 18px !important;
+      padding: 14px 16px !important;
       font-family: 'Inter', sans-serif !important;
-      color: var(--text-primary) !important;
+      color: #ededf5 !important;
       box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
       max-width: 300px;
+      pointer-events: none;
     }
-    .tooltip-name {
+    .tt-name {
       font-weight: 700;
-      font-size: 14px;
-      margin-bottom: 8px;
+      font-size: 13.5px;
+      margin-bottom: 7px;
       letter-spacing: -0.01em;
+      color: #ededf5;
     }
-    .tooltip-genres {
+    .tt-genres {
       font-size: 11px;
-      color: var(--text-secondary);
-      line-height: 1.6;
+      color: #8e8ea8;
+      line-height: 1.55;
     }
-    .tooltip-followers {
+    .tt-followers {
       font-size: 11px;
-      color: var(--accent-2);
+      color: #00e5c0;
       margin-top: 6px;
       font-weight: 500;
     }
@@ -923,14 +926,26 @@
     const artistMap = {};
     artists.forEach(a => artistMap[a.id] = a);
 
-    const nodes = artists.map(a => ({
+    const nodes = artists.map(a => {
+      // Create DOM element for tooltip (vis-network requires this for HTML rendering)
+      const tip = document.createElement('div');
+      const nameEl = document.createElement('div');
+      nameEl.className = 'tt-name';
+      nameEl.textContent = a.name;
+      const genresEl = document.createElement('div');
+      genresEl.className = 'tt-genres';
+      genresEl.textContent = '🎵 ' + a.genres.join(', ');
+      const followersEl = document.createElement('div');
+      followersEl.className = 'tt-followers';
+      followersEl.textContent = '👥 ' + formatFollowers(a.followers) + ' seguidores';
+      tip.appendChild(nameEl);
+      tip.appendChild(genresEl);
+      tip.appendChild(followersEl);
+
+      return {
       id: a.id,
       label: a.name,
-      title: `<div class="node-tooltip">
-                <div class="tooltip-name">${a.name}</div>
-                <div class="tooltip-genres">🎵 ${a.genres.join(', ')}</div>
-                <div class="tooltip-followers">👥 ${formatFollowers(a.followers)} seguidores</div>
-              </div>`,
+      title: tip,
       color: {
         background: GRAY_NODE,
         border: 'rgba(255,255,255,0.06)',
@@ -941,7 +956,7 @@
       size: Math.max(6, Math.min(20, Math.log10(a.followers + 1) * 2.2)),
       borderWidth: 1.2,
       shadow: { enabled: true, color: 'rgba(0,0,0,0.35)', size: 5, x: 0, y: 2 }
-    }));
+    };});
 
     const edges = graphEdges.map(e => ({
       from: e.from,
